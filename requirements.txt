@@ -1,0 +1,4 @@
+# Runtime dependency (Tkinter and SQLite ship with Python)
+requests>=2.31
+
+# Only needed to run the automated tests: pip install pytest
