@@ -16,9 +16,9 @@ DEPLETED = "DEPLETED"
 
 STATUS_LABELS = {
     EXPIRED: "Expired",
-    EXPIRING_30: "Expiring (30 days)",
-    EXPIRING_60: "Expiring (60 days)",
-    EXPIRING_90: "Expiring (90 days)",
+    EXPIRING_30: "Expiring (30d)",
+    EXPIRING_60: "Expiring (60d)",
+    EXPIRING_90: "Expiring (90d)",
     OK: "Good",
     DEPLETED: "Depleted",
 }

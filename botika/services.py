@@ -17,6 +17,7 @@ IMPORT_HEADERS = ["brand_name", "generic_name", "strength", "dosage_form",
 
 BATCH_FILTERS = {
     "ALL": "All batches",
+    "IN_STOCK": "In stock only (hide empty)",
     "EXPIRED": "Expired",
     "WITHIN_30": "Expiring within 30 days",
     "WITHIN_60": "Expiring within 60 days",
@@ -95,6 +96,8 @@ class InventoryService:
     def _matches_filter(row, status_filter, days) -> bool:
         if status_filter in (None, "ALL"):
             return True
+        if status_filter == "IN_STOCK":
+            return row["quantity"] > 0
         if row["quantity"] == 0:
             return False
         if status_filter == "EXPIRED":
@@ -123,6 +126,22 @@ class InventoryService:
 
     def list_movements(self, batch_id=None):
         return self.db.list_movements(batch_id)
+
+    # ---- stock alerts ------------------------------------------------
+    def stock_alerts(self, today: date | None = None) -> list:
+        """Medicines that are OUT or LOW, with the supplier of their latest batch."""
+        meds = [m for m in self.list_medicines(today=today)
+                if m["stock_status"] in ("OUT", "LOW")]
+        latest = {}
+        for b in self.db.list_batches():
+            current = latest.get(b["medicine_id"])
+            if current is None or b["date_received"] >= current[0]:
+                latest[b["medicine_id"]] = (b["date_received"], b["supplier"] or "")
+        for m in meds:
+            m["last_supplier"] = latest.get(m["id"], ("", ""))[1]
+        meds.sort(key=lambda m: (m["stock_status"] != "OUT", m["usable_stock"],
+                                 m["brand_name"].lower()))
+        return meds
 
     # ---- dashboard ---------------------------------------------------
     def dashboard_summary(self, today: date | None = None) -> dict:

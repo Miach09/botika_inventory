@@ -14,7 +14,8 @@ stock batches with expiry dates, stock movements, alerts and CSV reports.
 | Medicines | Add, view, update, delete; search by brand/generic name; filter by category |
 | Stock batches | Receive stock with batch number and expiry date; filter by expiry window |
 | Stock movements | Issue/dispense, dispose, or adjust a batch; full history per batch |
-| Dashboard | Totals, stock value, expired / expiring / low-stock alerts |
+| Dashboard | Summary cards (totals, stock value) and a list of expired / expiring / low-stock alerts |
+| Out of Stock | Medicines that are sold out or at/below the reorder level, with their last supplier |
 | Suppliers | Add, view, update, delete; search |
 | Drug information | "Get Drug Info" calls openFDA and shows indications, warnings, dosage |
 | Reports | Export medicines, batches, movements, expiry report to CSV; import medicines from CSV |
@@ -59,7 +60,9 @@ botika/
   api_client.py         openFDA REST client + JSON parsing + error classes
   reports.py            CSV export/import with file error handling
   services.py           InventoryService: application logic used by the GUI
-  gui/                  Tkinter interface (one module per tab)
+  gui/                  Tkinter interface: app.py (window), sidebar.py (navigation),
+                        theme.py (colours/styles), widgets.py (Card, tables, error handling),
+                        icons.py (embedded icons), one module per page
 tests/                  automated tests
 docs/TEST_CASES.md      test-case table
 ```
@@ -67,7 +70,7 @@ docs/TEST_CASES.md      test-case table
 ## Architecture and separation of responsibilities
 
 ```
-Tkinter GUI  ->  InventoryService  ->  Database (SQLite)
+Tkinter GUI (sidebar + pages)  ->  InventoryService  ->  Database (SQLite)
  (gui/)           (services.py)    ->  DrugInfoClient -> openFDA REST API
                                    ->  reports.py (CSV files)
 ```

@@ -51,6 +51,27 @@ def test_add_medicine_through_form_and_validation_message(app):
     assert len(med.tree.get_children()) == 1
 
 
+def test_add_medicine_can_be_cancelled(app, monkeypatch):
+    med = app.tabs[1]
+    fill(med, {"brand_name": "Biogesic", "generic_name": "acetaminophen"})
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: False)
+    med.add()
+    assert med.tree.get_children() == ()                 # nothing saved
+    assert med.vars["brand_name"].get() == "Biogesic"    # form left as typed
+
+
+def test_receive_stock_can_be_cancelled(app, service, monkeypatch):
+    service.add_medicine({"brand_name": "Biogesic", "generic_name": "acetaminophen"})
+    stock = app.tabs[2]
+    stock.refresh()
+    fill(stock, {"medicine": next(iter(stock.medicine_ids)), "batch_number": "B1",
+                 "quantity": "40", "expiry_date": in_days(90)})
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: False)
+    stock.receive()
+    assert stock.tree.get_children() == ()
+    assert stock.vars["batch_number"].get() == "B1"
+
+
 def test_update_delete_and_search(app):
     med = app.tabs[1]
     fill(med, {"brand_name": "A", "generic_name": "g1"})
@@ -87,12 +108,36 @@ def test_receive_stock_and_issue(app, service):
     assert stock.tree.item(row, "values")[2] == "35"
 
 
+def test_stock_sorting_by_batch_and_newest_first(app, service):
+    mid = service.add_medicine({"brand_name": "Diatabs", "generic_name": "loperamide"})
+    for number, received in (("B2", 5), ("B10", 3), ("B1", 1)):
+        service.receive_batch({"medicine_id": mid, "batch_number": number, "quantity": "5",
+                               "date_received": in_days(-received),
+                               "expiry_date": in_days(100)})
+    stock = app.tabs[2]
+    stock.refresh()
+
+    def batches():
+        return [stock.tree.item(i, "values")[1] for i in stock.tree.get_children()]
+
+    stock.sort_var.set("Newest batch first")
+    stock._on_sort_preset()
+    assert batches() == ["B1", "B10", "B2"]              # most recently received on top
+    stock.sort_var.set("Oldest batch first")
+    stock._on_sort_preset()
+    assert batches() == ["B2", "B10", "B1"]
+    stock.sort_by("batch")                               # heading click: natural A -> Z
+    assert batches() == ["B1", "B2", "B10"]
+    stock.sort_by("batch")                               # click again reverses
+    assert batches() == ["B10", "B2", "B1"]
+
+
 def test_dashboard_and_tab_switching(app, service):
     mid = service.add_medicine({"brand_name": "X", "generic_name": "g", "reorder_level": "50"})
     service.receive_batch({"medicine_id": mid, "batch_number": "1", "quantity": "5",
                            "expiry_date": in_days(5)})
     for i in range(len(app.tabs)):
-        app.notebook.select(i)
+        app.show(i)
         app.update()
     dash = app.tabs[0]
     dash.refresh()
@@ -112,3 +157,112 @@ def test_drug_info_success_and_failure_paths(app, service):
     med._info_failed(ApiNoResultsError("No drug label was found."))
     assert app.shown[-1][0] == "showwarning"
     assert str(med.info_button.cget("state")) == "normal"
+
+
+def test_sidebar_navigation_and_out_of_stock_page(app, service):
+    mid = service.add_medicine({"brand_name": "Empty", "generic_name": "g", "reorder_level": "5"})
+    sup = service.add_supplier({"name": "MedSupply"})
+    bid = service.receive_batch({"medicine_id": mid, "supplier_id": sup, "batch_number": "1",
+                                 "quantity": "3", "expiry_date": in_days(100)})
+    service.record_movement(bid, {"movement_type": "ISSUED", "quantity": "3"})
+    app.show(3)                                     # Out of Stock page
+    app.update()
+    page = app.tabs[3]
+    row = page.tree.item(page.tree.get_children()[0], "values")
+    assert row[0] == "OUT" and row[1] == "Empty" and row[-1] == "MedSupply"
+    assert app.sidebar.active == 3 and app.title_var.get().startswith("Out of Stock")
+
+
+def test_sidebar_hover_does_not_redraw_forever_and_click_navigates(app):
+    """Regression: hovering a menu item once caused an endless redraw loop (frozen window)."""
+    import time
+    paints = {"n": 0}
+    original = app.sidebar._paint
+
+    def counted():
+        paints["n"] += 1
+        return original()
+
+    app.sidebar._paint = counted
+    app.sidebar.event_generate("<Motion>", warp=True, x=100, y=96 + 2 * 46 + 19)
+    end = time.time() + 0.4
+    while time.time() < end:
+        app.update()
+    assert paints["n"] < 20
+    app.sidebar.event_generate("<Button-1>", x=100, y=96 + 3 * 46 + 19)
+    app.update()
+    assert app.current == 3 and app.sidebar.active == 3
+
+
+def _batch_with_long_reason(service):
+    mid = service.add_medicine({"brand_name": "Ventolin", "generic_name": "albuterol",
+                                "strength": "100 mcg"})
+    bid = service.receive_batch({"medicine_id": mid, "batch_number": "VT-1", "quantity": "4",
+                                 "expiry_date": in_days(200)})
+    reason = ("New stock came in and we have a low stock currently on Ventolin so this "
+              "adjustment was made after counting the shelf twice. " * 2).strip()[:195]
+    service.record_movement(bid, {"movement_type": "ADJUST_IN", "quantity": "30", "reason": reason})
+    return service.list_batches()[0], reason
+
+
+def _center_info(window):
+    """Measure where a window sits, using its OUTER frame (title bar and borders included).
+
+    winfo_rootx/rooty give the client area; winfo_x/y give the outer top-left corner.
+    """
+    window.update()
+    left, top = window.winfo_x(), window.winfo_y()
+    border = window.winfo_rootx() - left          # side/bottom border width
+    title = window.winfo_rooty() - top            # title bar height
+    outer_w = window.winfo_width() + 2 * border
+    outer_h = window.winfo_height() + title + border
+    return {"dx": left + outer_w / 2 - window.winfo_screenwidth() / 2,
+            "dy": top + outer_h / 2 - window.winfo_screenheight() / 2,
+            "pos": (left, top), "client": (window.winfo_width(), window.winfo_height()),
+            "border": border, "title": title,
+            "screen": (window.winfo_screenwidth(), window.winfo_screenheight()),
+            "geometry": window.geometry()}
+
+
+def _centered(window, tolerance=40):
+    info = _center_info(window)
+    return abs(info["dx"]) <= tolerance and abs(info["dy"]) <= tolerance
+
+
+def test_history_dialog_shows_close_button_full_reason_and_is_centered(app, service):
+    from botika.gui.dialogs import HistoryDialog
+    batch, reason = _batch_with_long_reason(service)
+    dialog = HistoryDialog(app, service, batch)
+    dialog.update()
+    # the Close button is fully inside the window (not pushed out of view)
+    button_bottom = dialog.close_button.winfo_rooty() + dialog.close_button.winfo_height()
+    assert dialog.close_button.winfo_ismapped()
+    assert button_bottom <= dialog.winfo_rooty() + dialog.winfo_height()
+    # selecting a row shows the whole reason, even though the table cuts it off
+    first = dialog.tree.get_children()[0]
+    dialog.tree.selection_set(first)
+    dialog.update()
+    assert reason in dialog.detail_text.get("1.0", "end").replace("\n", " ")
+    assert _centered(dialog), _center_info(dialog)
+    dialog.destroy()
+
+
+def test_movement_dialog_is_centered(app, service):
+    from botika.gui.dialogs import MovementDialog
+    batch, _ = _batch_with_long_reason(service)
+    dialog = MovementDialog(app, service, batch)
+    assert _centered(dialog), _center_info(dialog)
+    dialog.destroy()
+
+
+def test_main_window_starts_large(app):
+    app.update()
+    assert app.winfo_width() >= 1000 and app.winfo_height() >= 620      # never tiny, even on 1366x768
+
+
+def test_top_bar_shows_date_and_live_time(app):
+    import re
+    text = app.clock_var.get()
+    assert re.search(r"\d{4}   \|   \d{1,2}:\d{2}:\d{2} (AM|PM)$", text), text
+    app._tick()                                   # a tick refreshes the text without errors
+    assert re.search(r"\d{1,2}:\d{2}:\d{2} (AM|PM)$", app.clock_var.get())

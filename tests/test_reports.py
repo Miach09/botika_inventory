@@ -31,7 +31,8 @@ def test_export_to_missing_folder(service):
     assert "does not exist" in str(err.value)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0,
+                    reason="file permission test only works on Linux/Mac as a normal user")
 def test_export_permission_denied(service, tmp_path):
     locked = tmp_path / "locked"
     locked.mkdir()

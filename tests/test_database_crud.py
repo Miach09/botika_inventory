@@ -117,3 +117,33 @@ def test_data_persists_after_reopening(tmp_path):
     first.close()
     second = InventoryService(Database(path))
     assert second.list_medicines()[0]["brand_name"] == "Medicol"
+
+
+def test_stock_alerts_lists_out_and_low_with_last_supplier(service, db):
+    sup = service.add_supplier({"name": "MedSupply"})
+    out = service.add_medicine({"brand_name": "Out", "generic_name": "a", "reorder_level": "5"})
+    low = service.add_medicine({"brand_name": "Low", "generic_name": "b", "reorder_level": "10"})
+    fine = service.add_medicine({"brand_name": "Fine", "generic_name": "c", "reorder_level": "5"})
+    b_out = service.receive_batch({"medicine_id": out, "supplier_id": sup, "batch_number": "1",
+                                   "quantity": "4", "expiry_date": in_days(100)})
+    service.record_movement(b_out, {"movement_type": "ISSUED", "quantity": "4"})
+    service.receive_batch({"medicine_id": low, "batch_number": "1", "quantity": "8",
+                           "expiry_date": in_days(100)})
+    service.receive_batch({"medicine_id": fine, "batch_number": "1", "quantity": "50",
+                           "expiry_date": in_days(100)})
+    alerts = service.stock_alerts()
+    assert [(a["brand_name"], a["stock_status"]) for a in alerts] == [("Out", "OUT"), ("Low", "LOW")]
+    assert alerts[0]["last_supplier"] == "MedSupply" and alerts[1]["last_supplier"] == ""
+
+
+def test_in_stock_filter_hides_empty_batches(service):
+    mid = service.add_medicine({"brand_name": "Diatabs", "generic_name": "loperamide"})
+    old = service.receive_batch({"medicine_id": mid, "batch_number": "OLD", "quantity": "5",
+                                 "expiry_date": in_days(100)})
+    service.receive_batch({"medicine_id": mid, "batch_number": "NEW", "quantity": "8",
+                           "expiry_date": in_days(200)})
+    service.record_movement(old, {"movement_type": "DISPOSED", "quantity": "5",
+                                  "reason": "expired"})
+    assert {b["batch_number"] for b in service.list_batches()} == {"OLD", "NEW"}
+    shown = service.list_batches(status_filter="IN_STOCK")
+    assert [b["batch_number"] for b in shown] == ["NEW"]

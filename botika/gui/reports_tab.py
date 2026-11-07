@@ -1,50 +1,62 @@
-"""Reports tab: CSV export and import (file management)."""
+"""Reports page: CSV export and import (file management)."""
 from datetime import date
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from botika import config
-from botika.gui.widgets import guarded
+from botika.gui import theme
+from botika.gui.widgets import Card, guarded
 
 
 class ReportsTab(ttk.Frame):
     def __init__(self, parent, service, set_status):
-        super().__init__(parent, padding=12)
+        super().__init__(parent)
         self.service, self.set_status = service, set_status
         self.days_var = tk.StringVar(value="90")
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(1, weight=1)
 
-        export = ttk.LabelFrame(self, text="Export to CSV", padding=10)
-        export.pack(fill="x")
-        for i, (text, cmd) in enumerate([
-                ("Medicines & stock levels", self.export_medicines),
-                ("All stock batches", self.export_batches),
-                ("Stock movement history", self.export_movements)]):
-            ttk.Button(export, text=text, command=cmd, width=28).grid(
-                row=0, column=i, padx=4, pady=4)
-        row = ttk.Frame(export)
-        row.grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        ttk.Label(row, text="Expiry report: expired items and those expiring within").pack(side="left")
+        export = Card(self, "Export to CSV")
+        export.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 14))
+        for text, cmd in [("Medicines and stock levels", self.export_medicines),
+                          ("All stock batches", self.export_batches),
+                          ("Stock movement history", self.export_movements)]:
+            ttk.Button(export.body, text=text, style="Primary.TButton", command=cmd).pack(
+                fill="x", pady=3)
+        row = ttk.Frame(export.body, style="Card.TFrame")
+        row.pack(fill="x", pady=(10, 0))
+        ttk.Label(row, text="Expiry report within", style="Card.TLabel").pack(side="left")
         ttk.Combobox(row, textvariable=self.days_var, width=5, state="readonly",
                      values=[str(d) for d in config.EXPIRY_WINDOWS]).pack(side="left", padx=6)
-        ttk.Label(row, text="days").pack(side="left")
-        ttk.Button(row, text="Export expiry report", command=self.export_expiry).pack(
-            side="left", padx=10)
+        ttk.Label(row, text="days", style="Card.TLabel").pack(side="left")
+        ttk.Button(row, text="Export", style="Warning.TButton",
+                   command=self.export_expiry).pack(side="right")
 
-        importer = ttk.LabelFrame(self, text="Import medicines from CSV", padding=10)
-        importer.pack(fill="x", pady=12)
-        ttk.Label(importer, text="Required columns: brand_name, generic_name. Optional: "
-                  "strength, dosage_form, category, reorder_level, unit_cost.").pack(anchor="w")
-        buttons = ttk.Frame(importer)
-        buttons.pack(anchor="w", pady=(8, 0))
-        ttk.Button(buttons, text="Save blank template...", command=self.save_template).pack(side="left")
-        ttk.Button(buttons, text="Import CSV file...", command=self.import_csv).pack(side="left", padx=8)
+        importer = Card(self, "Import medicines from CSV")
+        importer.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 14))
+        ttk.Label(importer.body, style="Hint.TLabel", justify="left", text=(
+            "Required columns: brand_name, generic_name.\n"
+            "Optional: strength, dosage_form, category, reorder_level, unit_cost.\n"
+            "Rows with problems are skipped and listed in the activity log.")
+        ).pack(anchor="w", pady=(0, 10))
+        ttk.Button(importer.body, text="Save blank template...", style="Secondary.TButton",
+                   command=self.save_template).pack(fill="x", pady=3)
+        ttk.Button(importer.body, text="Import CSV file...", style="Success.TButton",
+                   command=self.import_csv).pack(fill="x", pady=3)
 
-        ttk.Label(self, text="Activity").pack(anchor="w")
-        self.log = tk.Text(self, height=12, state="disabled", wrap="word")
-        self.log.pack(fill="both", expand=True)
+        log_card = Card(self, "Activity", padding=10)
+        log_card.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        log_card.body.columnconfigure(0, weight=1)
+        log_card.body.rowconfigure(0, weight=1)
+        self.log = tk.Text(log_card.body, height=10, state="disabled", wrap="word",
+                           relief="flat", bg=theme.BG, fg=theme.TEXT, padx=10, pady=8,
+                           font=theme.font(10), highlightthickness=1,
+                           highlightbackground=theme.BORDER)
+        self.log.grid(row=0, column=0, sticky="nsew")
 
     def refresh(self):
-        pass  # nothing to reload; kept so every tab has the same interface
+        self.set_status("Ready.")  # nothing to reload on this page
 
     def _write_log(self, message):
         self.log.configure(state="normal")

@@ -1,16 +1,17 @@
-"""Suppliers tab: CRUD with search."""
+"""Suppliers page: CRUD with search."""
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from botika.gui.widgets import add_field, clear_table, guarded, make_table, selected_id
+from botika.gui.widgets import (Card, add_field, clear_table, guarded, make_table,
+                                selected_id)
 
-COLUMNS = [("name", "Supplier", 220, "w"), ("contact", "Contact number", 140, "w"),
-           ("address", "Address", 380, "w")]
+COLUMNS = [("name", "Supplier", 230, "w"), ("contact", "Contact number", 150, "w"),
+           ("address", "Address", 400, "w")]
 
 
 class SuppliersTab(ttk.Frame):
     def __init__(self, parent, service, set_status):
-        super().__init__(parent, padding=8)
+        super().__init__(parent)
         self.service, self.set_status = service, set_status
         self.selected = None
         self.vars = {k: tk.StringVar() for k in ("name", "contact_number", "address")}
@@ -18,30 +19,32 @@ class SuppliersTab(ttk.Frame):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
-        form = ttk.LabelFrame(self, text="Supplier Details", padding=10)
-        form.grid(row=0, column=0, sticky="ns", padx=(0, 8))
+        card = Card(self, "Supplier Details")
+        card.grid(row=0, column=0, sticky="ns", padx=(0, 16))
+        form = card.body
         form.columnconfigure(1, weight=1)
-        add_field(form, 0, "Name *", ttk.Entry(form, textvariable=self.vars["name"], width=28))
+        add_field(form, 0, "Name *", ttk.Entry(form, textvariable=self.vars["name"], width=22))
         add_field(form, 1, "Contact number", ttk.Entry(form, textvariable=self.vars["contact_number"]))
         add_field(form, 2, "Address", ttk.Entry(form, textvariable=self.vars["address"]))
-        buttons = ttk.Frame(form)
-        buttons.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        for i, (text, cmd) in enumerate([("Add", self.add), ("Update", self.update),
-                                         ("Delete", self.delete), ("Clear", self.clear_form)]):
+        buttons = ttk.Frame(form, style="Card.TFrame")
+        buttons.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        for i, (text, style, cmd) in enumerate([
+                ("Add", "Success", self.add), ("Update", "Warning", self.update),
+                ("Delete", "Danger", self.delete), ("Clear", "Secondary", self.clear_form)]):
             buttons.columnconfigure(i % 2, weight=1)
-            ttk.Button(buttons, text=text, command=cmd).grid(
-                row=i // 2, column=i % 2, sticky="ew", padx=2, pady=2)
+            ttk.Button(buttons, text=text, style=f"{style}.TButton", command=cmd).grid(
+                row=i // 2, column=i % 2, sticky="ew", padx=3, pady=3)
 
-        right = ttk.Frame(self)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
-        bar = ttk.Frame(right)
-        bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        ttk.Label(bar, text="Search:").pack(side="left")
-        ttk.Entry(bar, textvariable=self.search_var, width=30).pack(side="left", padx=6)
+        listing = Card(self, "List of suppliers", padding=10)
+        listing.grid(row=0, column=1, sticky="nsew")
+        listing.body.columnconfigure(0, weight=1)
+        listing.body.rowconfigure(1, weight=1)
+        bar = ttk.Frame(listing.body, style="Card.TFrame")
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(bar, text="Search:", style="Card.TLabel").pack(side="left")
+        ttk.Entry(bar, textvariable=self.search_var, width=30).pack(side="left", padx=8)
         self.search_var.trace_add("write", lambda *_: self.refresh())
-        frame, self.tree = make_table(right, COLUMNS, height=14)
+        frame, self.tree = make_table(listing.body, COLUMNS, height=14)
         frame.grid(row=1, column=0, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 

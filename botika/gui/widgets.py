@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from tkinter import messagebox, ttk
 
 from botika.api_client import ApiError
+from botika.gui import theme
 from botika.database import DatabaseError
 from botika.reports import ReportError
 from botika.validators import ValidationError
@@ -15,13 +16,13 @@ log = logging.getLogger(__name__)
 
 # Row colours used for stock / expiry status
 TAG_COLORS = {
-    "EXPIRED": "#f8d7da",
-    "EXPIRING_30": "#ffe0b3",
+    "EXPIRED": "#fbdcd9",
+    "EXPIRING_30": "#fde5d0",
     "EXPIRING_60": "#fff3cd",
-    "EXPIRING_90": "#e3f2fd",
-    "DEPLETED": "#e9ecef",
-    "OUT": "#f8d7da",
-    "LOW": "#ffe0b3",
+    "EXPIRING_90": "#dcebf9",
+    "DEPLETED": "#eceef3",
+    "OUT": "#fbdcd9",
+    "LOW": "#fde5d0",
 }
 
 
@@ -44,6 +45,27 @@ def make_table(parent, columns, height=10):
     for tag, color in TAG_COLORS.items():
         tree.tag_configure(tag, background=color)
     return frame, tree
+
+
+def center_window(win, width=None, height=None):
+    """Size a window (or use its natural size) and put it in the middle of the screen."""
+    win.update_idletasks()
+    w = width or win.winfo_reqwidth()
+    h = height or win.winfo_reqheight()
+    x = max((win.winfo_screenwidth() - w) // 2, 0)
+    y = max((win.winfo_screenheight() - h) // 2, 0)
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
+def maximize_window(win):
+    """Open maximized on Windows, Linux and macOS (each needs a different call)."""
+    try:
+        win.state("zoomed")                      # Windows (and some Linux builds)
+    except tk.TclError:
+        try:
+            win.attributes("-zoomed", True)      # most Linux window managers
+        except tk.TclError:                      # macOS: fill the screen instead
+            win.geometry(f"{win.winfo_screenwidth()}x{win.winfo_screenheight()}+0+0")
 
 
 def clear_table(tree):
@@ -102,6 +124,44 @@ def run_async(widget, func, on_success, on_error):
 
 
 def add_field(parent, row, label, widget):
-    ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3, padx=(0, 8))
-    widget.grid(row=row, column=1, sticky="ew", pady=3)
+    """One 'label + input' row inside a card."""
+    ttk.Label(parent, text=label, style="Card.TLabel").grid(
+        row=row, column=0, sticky="w", pady=4, padx=(0, 10))
+    widget.grid(row=row, column=1, sticky="ew", pady=4)
     return widget
+
+
+class Card(tk.Frame):
+    """White panel with a thin border and an optional blue title bar.
+
+    Put your widgets in `card.body`.
+    """
+
+    def __init__(self, parent, title=None, padding=14):
+        super().__init__(parent, bg=theme.BORDER)
+        inner = tk.Frame(self, bg=theme.CARD)
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+        if title:
+            head = tk.Frame(inner, bg=theme.BG)
+            head.pack(fill="x")
+            tk.Label(head, text=title, bg=theme.BG, fg=theme.PRIMARY,
+                     font=theme.font(11, True), anchor="w").pack(side="left", padx=14, pady=10)
+            tk.Frame(inner, bg=theme.BORDER, height=1).pack(fill="x")
+        self.body = ttk.Frame(inner, style="Card.TFrame", padding=padding)
+        self.body.pack(fill="both", expand=True)
+
+
+class StatCard(tk.Frame):
+    """Number card with a coloured left edge, used on the dashboard."""
+
+    def __init__(self, parent, title, accent, variable):
+        super().__init__(parent, bg=theme.BORDER)
+        inner = tk.Frame(self, bg=theme.CARD)
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+        tk.Frame(inner, bg=accent, width=5).pack(side="left", fill="y")
+        body = tk.Frame(inner, bg=theme.CARD)
+        body.pack(side="left", fill="both", expand=True, padx=16, pady=14)
+        tk.Label(body, text=title.upper(), bg=theme.CARD, fg=accent,
+                 font=theme.font(9, True), anchor="w").pack(anchor="w")
+        tk.Label(body, textvariable=variable, bg=theme.CARD, fg=theme.HEAD,
+                 font=theme.font(22, True), anchor="w").pack(anchor="w", pady=(4, 0))
