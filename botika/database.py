@@ -68,7 +68,16 @@ CREATE TABLE IF NOT EXISTS stock_movements (
         CHECK (movement_type IN ('RECEIVED','ISSUED','DISPOSED','ADJUST_IN','ADJUST_OUT')),
     quantity      INTEGER NOT NULL CHECK (quantity > 0),
     reason        TEXT NOT NULL DEFAULT '',
-    moved_at      TEXT NOT NULL
+    moved_at      TEXT NOT NULL,
+    performed_by  TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('ADMIN','STAFF')),
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_batches_medicine ON stock_batches(medicine_id);
 CREATE INDEX IF NOT EXISTS idx_batches_expiry   ON stock_batches(expiry_date);
@@ -127,6 +136,10 @@ class Database:
     def create_tables(self):
         with self._transaction() as conn:
             conn.executescript(SCHEMA)
+            columns = [r["name"] for r in conn.execute("PRAGMA table_info(stock_movements)")]
+            if "performed_by" not in columns:        # older database: add the new column
+                conn.execute("ALTER TABLE stock_movements "
+                             "ADD COLUMN performed_by TEXT NOT NULL DEFAULT ''")
             conn.executemany("INSERT OR IGNORE INTO categories(name) VALUES (?)",
                              [(c,) for c in config.DEFAULT_CATEGORIES])
 
@@ -223,7 +236,7 @@ class Database:
         return self._fetch(sql, params)
 
     # ---- stock batches -----------------------------------------------
-    def receive_batch(self, data: dict):
+    def receive_batch(self, data: dict, performed_by: str = ""):
         """Create a batch and log the RECEIVED movement in one transaction."""
         with self._transaction() as conn:
             cur = conn.execute(
@@ -236,9 +249,9 @@ class Database:
             batch_id = cur.lastrowid
             conn.execute(
                 "INSERT INTO stock_movements(batch_id, movement_type, quantity,"
-                " reason, moved_at) VALUES (?, 'RECEIVED', ?, ?, ?)",
+                " reason, moved_at, performed_by) VALUES (?, 'RECEIVED', ?, ?, ?, ?)",
                 (batch_id, data["quantity"], "Initial stock received",
-                 datetime.now().strftime("%Y-%m-%d %H:%M")))
+                 datetime.now().strftime("%Y-%m-%d %H:%M"), performed_by))
             return batch_id
 
     def update_batch(self, batch_id, data: dict):
@@ -282,7 +295,8 @@ class Database:
         return self._fetch(sql, params)
 
     # ---- stock movements ---------------------------------------------
-    def record_movement(self, batch_id, movement_type, quantity, reason=""):
+    def record_movement(self, batch_id, movement_type, quantity, reason="",
+                        performed_by=""):
         """Change a batch quantity and log it atomically (never below zero)."""
         sign = config.MOVEMENT_SIGNS[movement_type]
         with self._transaction() as conn:
@@ -298,9 +312,9 @@ class Database:
                          (new_qty, batch_id))
             conn.execute(
                 "INSERT INTO stock_movements(batch_id, movement_type, quantity,"
-                " reason, moved_at) VALUES (?,?,?,?,?)",
+                " reason, moved_at, performed_by) VALUES (?,?,?,?,?,?)",
                 (batch_id, movement_type, quantity, reason,
-                 datetime.now().strftime("%Y-%m-%d %H:%M")))
+                 datetime.now().strftime("%Y-%m-%d %H:%M"), performed_by))
             return new_qty
 
     def list_movements(self, batch_id=None):
@@ -316,3 +330,53 @@ class Database:
             params.append(batch_id)
         sql += " ORDER BY mv.id DESC"
         return self._fetch(sql, params)
+
+    # ---- users -------------------------------------------------------
+    def count_users(self) -> int:
+        return self._fetch("SELECT COUNT(*) AS n FROM users")[0]["n"]
+
+    def add_user(self, username, password_hash, role):
+        with self._transaction() as conn:
+            cur = conn.execute(
+                "INSERT INTO users(username, password_hash, role, active, created_at)"
+                " VALUES (?,?,?,1,?)",
+                (username, password_hash, role, datetime.now().strftime("%Y-%m-%d %H:%M")))
+            return cur.lastrowid
+
+    def get_user_by_name(self, username):
+        rows = self._fetch("SELECT * FROM users WHERE username = ?", (username,))
+        return rows[0] if rows else None
+
+    def get_user(self, user_id):
+        rows = self._fetch("SELECT * FROM users WHERE id = ?", (user_id,))
+        if not rows:
+            raise NotFoundError("That user no longer exists.")
+        return rows[0]
+
+    def list_users(self):
+        return self._fetch("SELECT id, username, role, active, created_at FROM users"
+                           " ORDER BY username COLLATE NOCASE")
+
+    def set_password_hash(self, user_id, password_hash):
+        with self._transaction() as conn:
+            cur = conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                               (password_hash, user_id))
+            if cur.rowcount == 0:
+                raise NotFoundError("That user no longer exists.")
+
+    def set_user_active(self, user_id, active: bool):
+        with self._transaction() as conn:
+            cur = conn.execute("UPDATE users SET active=? WHERE id=?",
+                               (1 if active else 0, user_id))
+            if cur.rowcount == 0:
+                raise NotFoundError("That user no longer exists.")
+
+    def set_user_role(self, user_id, role):
+        with self._transaction() as conn:
+            cur = conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+            if cur.rowcount == 0:
+                raise NotFoundError("That user no longer exists.")
+
+    def count_active_admins(self) -> int:
+        return self._fetch("SELECT COUNT(*) AS n FROM users"
+                           " WHERE role='ADMIN' AND active=1")[0]["n"]

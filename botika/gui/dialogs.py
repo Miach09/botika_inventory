@@ -102,7 +102,8 @@ class HistoryDialog(tk.Toplevel):
 
         frame, self.tree = make_table(self, [
             ("when", "Date / time", 140, "w"), ("type", "Movement", 110, "w"),
-            ("qty", "Qty", 60, "e"), ("reason", "Reason", 480, "w")], height=10)
+            ("qty", "Qty", 60, "e"), ("by", "Done by", 110, "w"),
+            ("reason", "Reason", 370, "w")], height=10)
         frame.pack(side="top", fill="both", expand=True, padx=14)
         self.tree.bind("<<TreeviewSelect>>", self._show_detail)
 
@@ -111,10 +112,12 @@ class HistoryDialog(tk.Toplevel):
             for m in service.list_movements(batch["id"]):
                 iid = str(m["id"])
                 self.details[iid] = (f"{m['moved_at']}   |   {m['movement_type']}   |   "
-                                     f"Quantity: {m['quantity']}\n"
+                                     f"Quantity: {m['quantity']}   |   "
+                                     f"Done by: {m['performed_by'] or '(not recorded)'}\n"
                                      f"{m['reason'] or '(no reason recorded)'}")
                 self.tree.insert("", "end", iid=iid, values=(
-                    m["moved_at"], m["movement_type"], m["quantity"], m["reason"]))
+                    m["moved_at"], m["movement_type"], m["quantity"],
+                    m["performed_by"], m["reason"]))
         self._set_detail("Click a row above to read its full reason here.")
 
         center_window(self, self.WIDTH, self.HEIGHT)

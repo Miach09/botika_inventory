@@ -19,7 +19,11 @@ def db():
 
 @pytest.fixture
 def service(db):
-    return InventoryService(db)
+    """A service with an admin logged in (the app always requires a login)."""
+    svc = InventoryService(db)
+    svc.create_first_admin("admin", "secret1")
+    svc.login("admin", "secret1")
+    return svc
 
 
 @pytest.fixture

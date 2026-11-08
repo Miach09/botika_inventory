@@ -113,9 +113,12 @@ def test_data_persists_after_reopening(tmp_path):
     from botika.services import InventoryService
     path = tmp_path / "persist.db"
     first = Database(path)
-    InventoryService(first).add_medicine(MED)
+    writer = InventoryService(first)
+    writer.create_first_admin("admin", "secret1")
+    writer.login("admin", "secret1")
+    writer.add_medicine(MED)
     first.close()
-    second = InventoryService(Database(path))
+    second = InventoryService(Database(path))      # reading needs no login
     assert second.list_medicines()[0]["brand_name"] == "Medicol"
 
 

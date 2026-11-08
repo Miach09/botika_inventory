@@ -12,7 +12,7 @@ tk = pytest.importorskip("tkinter")
 if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
     pytest.skip("no display available", allow_module_level=True)
 
-from tkinter import messagebox  # noqa: E402
+from tkinter import messagebox, ttk  # noqa: E402
 
 from botika.api_client import ApiNoResultsError, DrugInfo  # noqa: E402
 from botika.gui.app import BotikaApp  # noqa: E402
@@ -266,3 +266,37 @@ def test_top_bar_shows_date_and_live_time(app):
     assert re.search(r"\d{4}   \|   \d{1,2}:\d{2}:\d{2} (AM|PM)$", text), text
     app._tick()                                   # a tick refreshes the text without errors
     assert re.search(r"\d{1,2}:\d{2}:\d{2} (AM|PM)$", app.clock_var.get())
+
+
+def _buttons(widget, found=None):
+    found = [] if found is None else found
+    for child in widget.winfo_children():
+        if isinstance(child, ttk.Button):
+            found.append(child)
+        _buttons(child, found)
+    return found
+
+
+def test_staff_cannot_use_delete_buttons_or_see_users_page(service, db, monkeypatch):
+    service.add_user("maria", "maria123", "STAFF")
+    service.logout()
+    service.login("maria", "maria123")
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    try:
+        window = BotikaApp(service)
+    except tk.TclError:
+        pytest.skip("Tk could not open a display")
+    try:
+        window.update()
+        assert len(window.tabs) == 6                      # no Users page for staff
+        for tab in window.tabs[1:3] + [window.tabs[4]]:   # medicines, batches, suppliers
+            delete = [b for b in _buttons(tab) if str(b.cget("text")).startswith("Delete")]
+            assert delete and all(b.instate(["disabled"]) for b in delete)
+    finally:
+        window.destroy()
+
+
+def test_admin_sees_users_page_and_delete_buttons(app):
+    assert len(app.tabs) == 7                             # Users page is last
+    delete = [b for b in _buttons(app.tabs[2]) if str(b.cget("text")).startswith("Delete")]
+    assert delete and not delete[0].instate(["disabled"])

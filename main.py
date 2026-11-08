@@ -8,6 +8,7 @@ from botika import config
 from botika.api_client import DrugInfoClient
 from botika.database import Database, DatabaseError
 from botika.gui.app import BotikaApp
+from botika.gui.login import run_login
 from botika.services import InventoryService
 
 
@@ -22,8 +23,13 @@ def main() -> int:
         root.withdraw()
         messagebox.showerror("Cannot start", str(exc))
         return 1
+    service = InventoryService(db, DrugInfoClient())
     try:
-        BotikaApp(InventoryService(db, DrugInfoClient())).mainloop()
+        while run_login(service):               # log in, work, log out, repeat
+            app = BotikaApp(service)
+            app.mainloop()
+            if not app.logged_out:              # window closed or File > Exit
+                break
     finally:
         db.close()
     return 0

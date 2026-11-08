@@ -1,6 +1,7 @@
 """Central settings and shared constants for the Botika Inventory System."""
 from pathlib import Path
 
+IDLE_LOGOUT_MINUTES = 15      # log out automatically after this much inactivity
 APP_TITLE = "Botika Inventory Management System"
 
 # --- Paths -------------------------------------------------------------

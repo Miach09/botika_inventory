@@ -32,8 +32,10 @@ class SuppliersTab(ttk.Frame):
                 ("Add", "Success", self.add), ("Update", "Warning", self.update),
                 ("Delete", "Danger", self.delete), ("Clear", "Secondary", self.clear_form)]):
             buttons.columnconfigure(i % 2, weight=1)
-            ttk.Button(buttons, text=text, style=f"{style}.TButton", command=cmd).grid(
-                row=i // 2, column=i % 2, sticky="ew", padx=3, pady=3)
+            button = ttk.Button(buttons, text=text, style=f"{style}.TButton", command=cmd)
+            button.grid(row=i // 2, column=i % 2, sticky="ew", padx=3, pady=3)
+            if style == "Danger" and not self.service.is_admin:
+                button.state(["disabled"])            # only an admin may delete
 
         listing = Card(self, "List of suppliers", padding=10)
         listing.grid(row=0, column=1, sticky="nsew")

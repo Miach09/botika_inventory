@@ -5,9 +5,11 @@ database layer, the API client and the file/report layer, so each of those can
 change without touching the interface.
 """
 from datetime import date
+import time
 
-from botika import config, rules, validators
+from botika import auth, config, rules, validators
 from botika.api_client import DrugInfo, DrugInfoClient
+from botika.auth import AuthError
 from botika.database import Database
 from botika.reports import ReportError, read_csv, write_csv
 from botika.validators import ValidationError
@@ -30,6 +32,114 @@ class InventoryService:
     def __init__(self, db: Database, drug_client: DrugInfoClient | None = None):
         self.db = db
         self.drug_client = drug_client or DrugInfoClient()
+        self.current_user = None          # set by login(); None means nobody is logged in
+        self._failed_logins = 0
+        self._locked_until = 0.0
+
+    # ---- login, roles and users --------------------------------------
+    @property
+    def username(self) -> str:
+        return self.current_user["username"] if self.current_user else ""
+
+    @property
+    def is_admin(self) -> bool:
+        return bool(self.current_user) and self.current_user["role"] == auth.ROLE_ADMIN
+
+    def _require_login(self):
+        """Check someone is logged in, using their CURRENT role and status.
+
+        The account is re-read each time, so an admin changing a role or turning an
+        account off takes effect immediately, even if that person is still logged in.
+        """
+        if not self.current_user:
+            raise AuthError("Please log in first.")
+        row = self.db.get_user_by_name(self.current_user["username"])
+        if row is None or not row["active"]:
+            self.current_user = None
+            raise AuthError("Your account was turned off. Please log in again.")
+        self.current_user["role"] = row["role"]
+
+    def _require_admin(self, action: str):
+        self._require_login()
+        if not self.is_admin:
+            raise AuthError(f"Only an admin can {action}.")
+
+    def has_users(self) -> bool:
+        return self.db.count_users() > 0
+
+    def create_first_admin(self, username, password):
+        """First run only: the very first account is always an admin."""
+        if self.has_users():
+            raise AuthError("An account already exists. Please log in.")
+        self.db.add_user(auth.check_username(username),
+                         auth.hash_password(auth.check_password(password)),
+                         auth.ROLE_ADMIN)
+
+    def login(self, username, password):
+        remaining = self._locked_until - time.monotonic()
+        if remaining > 0:
+            raise AuthError(f"Too many failed attempts. Try again in {int(remaining) + 1} seconds.")
+        user = self.db.get_user_by_name((username or "").strip())
+        if (user is None or not user["active"]
+                or not auth.verify_password(password or "", user["password_hash"])):
+            self._failed_logins += 1
+            if self._failed_logins >= auth.MAX_FAILED_LOGINS:
+                self._failed_logins = 0
+                self._locked_until = time.monotonic() + auth.LOCKOUT_SECONDS
+            raise AuthError("Wrong username or password.")
+        self._failed_logins = 0
+        self.current_user = {"id": user["id"], "username": user["username"],
+                             "role": user["role"]}
+        return self.current_user
+
+    def logout(self):
+        self.current_user = None
+
+    def change_own_password(self, old_password, new_password):
+        self._require_login()
+        user = self.db.get_user(self.current_user["id"])
+        if not auth.verify_password(old_password or "", user["password_hash"]):
+            raise AuthError("Your current password is not correct.")
+        self.db.set_password_hash(user["id"],
+                                  auth.hash_password(auth.check_password(new_password)))
+
+    def list_users(self):
+        self._require_admin("view user accounts")
+        return self.db.list_users()
+
+    def add_user(self, username, password, role):
+        self._require_admin("add users")
+        if role not in auth.ROLE_LABELS:
+            raise AuthError("Choose a role for the new user.")
+        return self.db.add_user(auth.check_username(username),
+                                auth.hash_password(auth.check_password(password)), role)
+
+    def reset_password(self, user_id, new_password):
+        self._require_admin("reset passwords")
+        self.db.set_password_hash(user_id,
+                                  auth.hash_password(auth.check_password(new_password)))
+
+    def set_user_role(self, user_id, role):
+        self._require_admin("change roles")
+        if role not in auth.ROLE_LABELS:
+            raise AuthError("Choose a role.")
+        target = self.db.get_user(user_id)
+        if target["id"] == self.current_user["id"]:
+            raise AuthError("You cannot change your own role. Ask another admin.")
+        if (target["role"] == auth.ROLE_ADMIN and role != auth.ROLE_ADMIN
+                and target["active"] and self.db.count_active_admins() <= 1):
+            raise AuthError("At least one admin account must stay active.")
+        self.db.set_user_role(user_id, role)
+
+    def set_user_active(self, user_id, active: bool):
+        self._require_admin("turn accounts on or off")
+        target = self.db.get_user(user_id)
+        if not active:
+            if target["id"] == self.current_user["id"]:
+                raise AuthError("You cannot turn off your own account.")
+            if target["role"] == auth.ROLE_ADMIN and self.db.count_active_admins() <= 1:
+                raise AuthError("At least one admin account must stay active.")
+        self.db.set_user_active(user_id, active)
 
     # ---- categories & suppliers --------------------------------------
     def list_categories(self):
@@ -39,14 +149,17 @@ class InventoryService:
         return self.db.list_suppliers(search)
 
     def add_supplier(self, raw):
+        self._require_login()
         data = validators.validate_supplier(raw)
         return self.db.add_supplier(**data)
 
     def update_supplier(self, supplier_id, raw):
+        self._require_login()
         data = validators.validate_supplier(raw)
         self.db.update_supplier(supplier_id, **data)
 
     def delete_supplier(self, supplier_id):
+        self._require_admin("delete suppliers")
         self.db.delete_supplier(supplier_id)
 
     # ---- medicines ---------------------------------------------------
@@ -58,12 +171,15 @@ class InventoryService:
         return rows
 
     def add_medicine(self, raw):
+        self._require_login()
         return self.db.add_medicine(validators.validate_medicine(raw))
 
     def update_medicine(self, medicine_id, raw):
+        self._require_login()
         self.db.update_medicine(medicine_id, validators.validate_medicine(raw))
 
     def delete_medicine(self, medicine_id):
+        self._require_admin("delete medicines")
         self.db.delete_medicine(medicine_id)
 
     # ---- drug information (REST API) ---------------------------------
@@ -109,20 +225,25 @@ class InventoryService:
         return True
 
     def receive_batch(self, raw, today: date | None = None):
+        self._require_login()
         data = validators.validate_batch(raw, creating=True, today=today)
-        return self.db.receive_batch(data)
+        return self.db.receive_batch(data, performed_by=self.username)
 
     def update_batch(self, batch_id, raw, today: date | None = None):
+        self._require_login()
         data = validators.validate_batch(raw, creating=False, today=today)
         self.db.update_batch(batch_id, data)
 
     def delete_batch(self, batch_id):
+        self._require_admin("delete batches")
         self.db.delete_batch(batch_id)
 
     def record_movement(self, batch_id, raw):
+        self._require_login()
         data = validators.validate_movement(raw)
         return self.db.record_movement(batch_id, data["movement_type"],
-                                       data["quantity"], data["reason"])
+                                       data["quantity"], data["reason"],
+                                       performed_by=self.username)
 
     def list_movements(self, batch_id=None):
         return self.db.list_movements(batch_id)
@@ -217,10 +338,10 @@ class InventoryService:
 
     def export_movements(self, path) -> int:
         rows = [[m["moved_at"], m["brand_name"], m["strength"], m["batch_number"],
-                 m["movement_type"], m["quantity"], m["reason"]]
+                 m["movement_type"], m["quantity"], m["reason"], m["performed_by"]]
                 for m in self.list_movements()]
         return write_csv(path, ["Date/Time", "Brand", "Strength", "Batch No.",
-                                "Movement", "Quantity", "Reason"], rows)
+                                "Movement", "Quantity", "Reason", "Done By"], rows)
 
     def write_import_template(self, path) -> int:
         sample = [["Biogesic", "acetaminophen", "500 mg", "Tablet",

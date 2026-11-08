@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from tkinter import messagebox, ttk
 
 from botika.api_client import ApiError
+from botika.auth import AuthError
 from botika.gui import theme
 from botika.database import DatabaseError
 from botika.reports import ReportError
@@ -86,6 +87,8 @@ def guarded():
     except ValidationError as exc:
         messagebox.showwarning("Please check your input",
                                "\n".join(f"\u2022 {e}" for e in exc.errors))
+    except AuthError as exc:
+        messagebox.showwarning("Not allowed", str(exc))
     except DatabaseError as exc:
         messagebox.showerror("Database error", str(exc))
     except ReportError as exc:
